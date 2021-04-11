@@ -73,6 +73,7 @@ static bool Read(void *object)
 static int on_send(char *buffer, int *size, void *data)
 {
     int *state = (int *)data;
+    memset(buffer, 0, BUFFER_SIZE);
     snprintf(buffer, strlen(states[*state]) + 1, "%s",states[*state]);
     *size = strlen(states[*state]) + 1;
 

@@ -36,6 +36,8 @@ int main(int argc, char *argv[])
         .port = 5555,
         .buffer = server_buffer,
         .buffer_size = sizeof(server_buffer),
+        .certificate = "mycert.pem",
+        .key = "mycert.pem",
         .cb.on_receive = on_receive_message
     };
 
@@ -53,7 +55,7 @@ bool Init(void *object)
 bool Set(void *object, uint8_t state)
 {
     (void)object;    
-    openlog("LED PIPE", LOG_PID | LOG_CONS , LOG_USER);
+    openlog("LED TCP SSL", LOG_PID | LOG_CONS , LOG_USER);
     syslog(LOG_INFO, "LED Status: %s", state ? "On": "Off");
     closelog(); 
     return true;

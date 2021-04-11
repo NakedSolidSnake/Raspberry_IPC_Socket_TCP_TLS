@@ -15,6 +15,8 @@ bool Button_Run(TCP_Client_t *client, Button_Data *button)
     if(button->interface->Init(button->object) == false)
         return false;
 
+    TCP_Client_Init(client);
+
     while(true)
     {
         while (true)

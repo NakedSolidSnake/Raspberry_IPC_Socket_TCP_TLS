@@ -2,6 +2,14 @@
   <img src="https://i.ytimg.com/vi/ou8UVN7SG6s/maxresdefault.jpg">
 </p>
 
+openssl s_client -connect localhost:5555
+
+instalar na raspberry
+sudo apt-get update
+sudo apt-get install tcpdump
+
+sudo tcpdump -i lo -nnSX port 1234
+
 # _Socket_
 ## Introdução
 ## Implementação

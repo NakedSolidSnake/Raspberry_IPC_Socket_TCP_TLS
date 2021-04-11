@@ -44,7 +44,7 @@ target_include_directories(interface
 
 #build lib tcp
 add_library(tcp "")
-target_link_libraries(tcp PUBLIC m)
+target_link_libraries(tcp PUBLIC m ssl crypto)
 target_sources(tcp PUBLIC 
   ${CMAKE_CURRENT_LIST_DIR}/lib/tcp_server.c   
   ${CMAKE_CURRENT_LIST_DIR}/lib/tcp_client.c   

@@ -20,6 +20,7 @@ typedef struct
     TCP_Callback_t cb;
 } TCP_Client_t;
 
+bool TCP_Client_Init(TCP_Client_t *client);
 bool TCP_Client_Connect(TCP_Client_t *client, void *data);
 
 #endif /* TCP_CLIENT_H_ */

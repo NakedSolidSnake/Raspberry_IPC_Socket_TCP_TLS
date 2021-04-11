@@ -39,6 +39,8 @@ int main(int argc, char *argv[])
         .port = 5555,
         .buffer = server_buffer,
         .buffer_size = sizeof(server_buffer),
+        .certificate = "mycert.pem",
+        .key = "mycert.pem",
         .cb.on_receive = on_receive_message
     };
 
