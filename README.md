@@ -10,6 +10,8 @@ sudo apt-get install tcpdump
 
 sudo tcpdump -i lo -nnSX port 1234
 
+https://aticleworld.com/ssl-server-client-using-openssl-in-c/
+
 # _Socket_
 ## Introdução
 ## Implementação
