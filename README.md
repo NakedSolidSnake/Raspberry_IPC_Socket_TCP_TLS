@@ -2,7 +2,7 @@
   <img src="https://cdn0.sbnation.com/assets/3417793/moveoverlynnswann.gif"/>
 </p>
 
-# _TLS_
+# _TCP SSL_
 
 ## Tópicos
 * [Introdução](#introdução)
@@ -25,14 +25,270 @@
 * [Referência](#referência)
 
 ## Introdução
-Preencher
+No artigo anterior sobre [TCP](https://github.com/NakedSolidSnake/Raspberry_IPC_Socket_TCP) foi demonstrado como ocorre o processo de comunicação desse IPC, porém conforme descrito no artigo é possível notar que os dados trafegam de forma legível(plaintext), sendo possível realizar a leitura sem maiores problemas. Existem aplicações que a exposição desses dados resulta no compromentimento da aplicação, permitindo que "curiosos" bisbilhotem. Para garantir que os dados não serão capturados e usados de forma ilícita existe uma forma de proteger os dados através da criptografia. Neste artigo será demonstrado como implementar esse IPC usando SSL para proteger as mensagens transitadas. Esse artigo foi baseado/traduzido nesse [exemplo](https://aticleworld.com/ssl-server-client-using-openssl-in-c/).
 
-## Implementação
+## O Que é SSL
+SSL significa _Secure Sockets Layer_ que é um protocolo usado para estabelecer uma conexão criptografada entre um servidor e um cliente. Após estabelecer a conexão, o SSL garante que os dados transmitidos entre o cliente e o servidor estão seguros.
 
-Para demonstrar o uso desse IPC, iremos utilizar o modelo Produtor/Consumidor, onde o processo Produtor(_button_process_) vai escrever seu estado interno no arquivo, e o Consumidor(_led_process_) vai ler o estado interno e vai aplicar o estado para si. Aplicação é composta por três executáveis sendo eles:
+## Funcionamento SSL
+SSL usa algoritmo de criptografia assimétrica para progeter a transmissão dos dados. Estes algoritmos usam um par de chaves sendo uma pública e outra privada. A chave pública fica disponível e conhecida por qualquer um. A chave privada é conhecida somente pelo servidor ou pelo cliente. Com o SSL a mensagem criptografada pela chave pública pode ser descriptografada somente pela chave privada e a mensagem criptografada pela chave privada pode ser descriptografada pela chave pública.
+
+
+## Handshake SSL
+O processo de _handshake_ ocorre em 8 passos antes do início da troca de mensagens entre as parte, para melhr saber como ocorre esse processo a IBM possui um artigo muito explicativo podendo ser acessado [aqui](https://www.ibm.com/docs/pt-br/ibm-mq/8.0?topic=ssl-overview-tls-handshake).
+
+
+## Preparação do Ambiente
+Antes de apresentarmos o exemplo, primeiro precisaremos instalar algumas ferramentas para auxiliar na análise da comunicação. As ferramentas necessárias para esse artigo são o tcpdump e o openssl, para instalá-las basta executar os comandos abaixo:
+
+```bash
+sudo apt-get update
+```
+
+```bash
+sudo apt-get install openssl
+```
+
+```bash
+sudo apt-get install tcpdump
+```
+
+## openssl
+OpenSSL é uma ferramente de criptografia que implementa os protocolos SSL e TLS(_Transport Layer Security_). Com essa ferramenta é posspivel se conectar a servidores que utilizam SSL/TLS.
+
+## tcpdump 
+O tcpdump é uma ferramenta capaz de monitorar o tráfego de dados em uma dada interface como por exemplo eth0, com ele é possível analisar os pacotes que são recebido e enviados
+
+Para demonstrar o uso desse IPC, iremos utilizar o modelo Cliente/Servidor, onde o processo Cliente(_button_process_) vai enviar uma mensagem com comandos pré-determinados para o servidor, e o Servidor(_led_process_) vai ler as mensagens e verificar se possui o comando cadastrado, assim o executando.
+Para melhor isolar as implementações do servidor e do cliente foi criado uma biblioteca, que abstrai a rotina de inicialização e execução do servidor, e a rotina de conexão por parte do cliente.
+
+### Biblioteca
+A biblioteca criada permite uma fácil criação do servidor, sendo o servidor orientado a eventos, ou seja, fica aguardando as mensagens chegarem.
+
+#### tcp_interface.h
+Primeiramente criamos uma interface resposável por eventos de envio e recebimento, essa funções serão chamadas quando esses eventos ocorrerem.
+
+```c
+typedef struct 
+{
+    int (*on_send)(char *buffer, int *size, void *user_data);  
+    int (*on_receive)(char *buffer, int size, void *user_data);
+} TCP_Callback_t;
+```
+
+#### tcp_server.h
+
+Criamos também um contexto que armazena os paramêtros utilizados pelo servidor, sendo o _socket_ para armazenar a instância criada, _port_ que recebe o número que corresponde onde o serviço será disponibilizado, _buffer_ que aponta para a memória alocada previamente pelo usuário, *buffer_size* o representa o tamanho do _buffer_ e a interface das funções de _callback_
+
+```c
+typedef struct
+{
+    int socket;
+    int port;
+    char *buffer;
+    int buffer_size;
+    TCP_Callback_t cb;
+} TCP_Server_t;
+```
+
+Essa função realiza os passos de 1 a 3 previamente descritos, para a inicilização do servidor
+```c
+bool TCP_Server_Init(TCP_Server_t *server);
+```
+
+Essa função aguarda uma conexão e realiza a comunicação com o cliente.
+```c
+bool TCP_Server_Exec(TCP_Server_t *server, void *data);
+```
+#### tcp_server.c
+
+No TCP_Server_Init definimos algumas váriaveis para auxiliar na inicialização do servidor, sendo uma variável booleana que representa o estado da inicialização do servidor, uma variável do tipo inteiro que recebe o resultado das funções necessárias para a configuração, uma variável do tipo inteiro para habilitar o reuso da porta caso o servidor precise reiniciar e uma estrutura sockaddr_in que é usada para configurar o servidor para se comunicar através da rede.
+```c
+bool status = false;
+int is_valid;
+int enable_reuse = 1;
+struct sockaddr_in address;
+```
+Para realizar a inicialização é criado um dummy do while, para que quando houver falha em qualquer uma das etapas, irá sair da função com status de erro, nesse ponto verificamos se o contexto e o buffer foi inicializado, que é de reponsabilidade do usuário
+
+```c
+if(!server || !server->buffer)
+    break;
+```
+Criamos um endpoint com o perfil de se conectar via protocolo IPv4(AF_INET), do tipo stream que caracteriza o TCP(SOCK_STREAM), o último parâmetro pode ser 0 nesse caso.
+```c
+server->socket = socket(AF_INET, SOCK_STREAM, 0);
+if(server->socket < 0)
+    break;
+```
+Aqui permitimos o reuso do socket caso necessite reiniciar o serviço
+```c
+is_valid = setsockopt(server->socket, SOL_SOCKET, SO_REUSEADDR, (void *)&enable_reuse, sizeof(enable_reuse));
+if(is_valid < 0)
+    break;
+```
+
+Preenchemos a estrutura com parâmetros fornecidos pelo usuário como em qual porta que o serviço vai rodar.
+```c
+memset(&address, 0, sizeof(address));
+
+address.sin_family = AF_INET;
+address.sin_addr.s_addr = htonl(INADDR_ANY);
+address.sin_port = htons(server->port);
+```
+
+Aplicamos as configurações ao socket criado
+```c
+is_valid = bind(server->socket, (struct sockaddr *)&address, sizeof(address));
+if(is_valid != 0)
+    break;
+```
+
+Por fim colocamos o socket para escutar novas conexões
+```c
+is_valid = listen(server->socket, 1);
+if(is_valid < 0)
+    break;
+
+status = true;
+```
+
+Na função TCP_Server_Exec declaramos algumas variáveis para realizar a conexão e comunicação com o cliente
+
+```c
+struct sockaddr_in address;
+socklen_t addr_len = sizeof(address);
+int client_socket;
+size_t read_len;
+int write_len;    
+bool status = false;
+```
+
+Quando a conexão é solicitada por parte do cliente, o accept retorna o socket referente a conexão, caso for feita com sucesso
+```c
+client_socket = accept(server->socket, (struct sockaddr *)&address, &addr_len);
+if(client_socket > 0)
+```
+
+O Servidor aguarda a troca de mensagem, assim que receber realiza a verificação se o callback para recebimento foi preenchido caso sim, passa o conteúdo para o callback realizar o tratamento.
+```c
+read_len = recv(client_socket, server->buffer, server->buffer_size, 0);
+if(server->cb.on_receive)
+{
+    server->cb.on_receive(server->buffer, read_len, data);
+}
+```
+Aqui é verificado se o callback para envio foi configurado, dessa forma o buffer é passado para que a implementação prepare a mensagem a ser enviada, e alteramos o status para true, indicando que a comunicação foi feita com sucesso.
+```c
+if(server->cb.on_send)
+{
+    server->cb.on_send(server->buffer, &write_len, data);
+    send(client_socket, server->buffer, (int)fmin(write_len, server->buffer_size), 0);
+}
+
+status = true;
+``` 
+
+Interrompemos qualquer nova transação e fechamos o socket usado, concluindo a comunicação
+```c
+shutdown(client_socket, SHUT_RDWR);
+close(client_socket);
+``` 
+
+#### tcp_client.h
+Criamos também um contexto que armazena os paramêtros utilizados pelo cliente, sendo o _socket_ para armazenar a instância criada, _hostname_ é o ip que da máquina que vai ser conectar, _port_ que recebe o número que corresponde qual o serviço deseja consumir, _buffer_ que aponta para a memória alocada previamente pelo usuário, *buffer_size* o representa o tamanho do _buffer_ e a interface das funções de _callback_
+
+```c
+typedef struct 
+{
+    int socket;
+    const char *hostname;
+    int port;
+    char *buffer;
+    size_t buffer_size;
+    TCP_Callback_t cb;
+} TCP_Client_t;
+```
+
+Essa função realiza a conexão, envio e recebimento de mensagens para o servidor configurado
+```c
+bool TCP_Client_Connect(TCP_Client_t *client, void *data);
+```
+
+#### tcp_client.c
+Na função TCP_Client_Connect definimos algumas váriaveis para auxiliar na comunicação com o servidor, sendo uma variável booleana que representa o estado da parametrização do cliente, uma variável do tipo inteiro que recebe o resultado das funções necessárias para a configuração, uma estrutura sockaddr_in que é usada para configurar o servidor no qual será conectado, e duas variáveis de quantidade de dados enviados e recebidos.
+
+```c
+bool status = false;
+int is_valid;
+struct sockaddr_in server;
+int send_size;
+int recv_size;
+```
+Verificamos se o contexto e o buffer do cliente foram inicializados
+```c
+if(!client || !client->buffer || client->buffer_size <= 0)
+    break;
+```
+
+Criamos um endpoint com o perfil de se conectar via protocolo IPv4(AF_INET), do tipo stream que caracteriza o TCP(SOCK_STREAM), o último parâmetro pode ser 0 nesse caso.
+```c
+client->socket = socket(AF_INET, SOCK_STREAM, 0);
+if(client->socket < 0)
+    break;
+
+```
+Preenchemos a estrutura com o parâmetros pertinentes ao servidor
+```c
+server.sin_family = AF_INET;
+server.sin_port = htons(client->port);
+```
+
+Convertemos o hostname para o endereço relativo ao servidor
+```c
+is_valid = inet_pton(AF_INET, client->hostname, &server.sin_addr);
+if(is_valid <= 0)
+    break;
+```
+Solicitamos a conexão com o servidor previamente configurado, caso ocorra tudo de forma correta alteramos o status para verdadeiro
+```c
+is_valid = connect(client->socket, (struct sockaddr *)&server, sizeof(server));
+if(is_valid < 0)
+    break;
+
+status = true;
+```
+
+Aqui verificamos se a inicialização ocorreu com sucesso e se o callback para envio foi preenchido
+```c
+if( status && client->cb.on_send)
+```
+Em caso de sucesso passamos o contexto para a implementação feita pelo usuário para preparar o dados a ser enviado para o servidor
+```c
+client->cb.on_send(client->buffer, &send_size, data);
+send(client->socket, client->buffer, (int)fmin(send_size, client->buffer_size), 0);
+```
+
+Se o callback para o recebimento foi preenchido passamos o contexto para a implementação do usuário tratar a resposta
+```c
+if(client->cb.on_receive)
+{
+    recv_size = recv(client->socket, client->buffer, client->buffer_size, 0);
+    client->cb.on_receive(client->buffer, recv_size, data);
+}
+```
+Por fim interrompemos qualquer nova transação e fechamos o socket e retornamos o status
+```c
+shutdown(client->socket, SHUT_RDWR);
+close(client->socket);
+
+return status;
+```
+
+ A aplicação é composta por três executáveis sendo eles:
 * _launch_processes_ - é responsável por lançar os processos _button_process_ e _led_process_ atráves da combinação _fork_ e _exec_
-* _button_interface_ - é reponsável por ler o GPIO em modo de leitura da Raspberry Pi e escrever o estado interno no arquivo
-* _led_interface_ - é reponsável por ler do arquivo o estado interno do botão e aplicar em um GPIO configurado como saída
+* _button_interface_ - é reponsável por ler o GPIO em modo de leitura da Raspberry Pi e se conectar ao servidor para enviar uma mensagem de alteração de estado.
+* _led_interface_ - é reponsável por escutar novas conexões, recebendo comandos para aplicar em um GPIO configurado como saída
 
 ### *launch_processes*
 
@@ -71,10 +327,109 @@ if(pid_led == 0)
 }
 ```
 
-## *button_interface*
-descrever o código
-## *led_interface*
-descrever o código
+### *button_interface*
+A implementação do Button_Run ficou simples, onde realizamos a inicialização do interface de botão e ficamos em loop aguardando o pressionamento do botão para alterar o estado da variável e enviar a mensagem para o servidor
+```c
+bool Button_Run(TCP_Client_t *client, Button_Data *button)
+{
+    static int state = 0;
+
+    if(button->interface->Init(button->object) == false)
+        return false;
+
+    while(true)
+    {
+        wait_press(button);
+        state ^= 0x01;
+        TCP_Client_Connect(client, &state);
+    }
+}
+```
+
+### *led_interface*
+A implementação do LED_Run ficou simples também, onde realizamos a inicialização da interface de LED, do servidor e ficamos em loop aguardando o recebimento de uma conexão.
+```c
+bool LED_Run(TCP_Server_t *server, LED_Data *led)
+{
+    if(led->interface->Init(led->object) == false)
+        return false;
+
+    TCP_Server_Init(server);
+
+    while(true)
+    {
+        TCP_Server_Exec(server, led);
+    }
+
+    return false;
+}
+```
+
+### *button_process*
+
+Definimos uma lista de comandos que iremos enviar
+```c
+const char *states[] = 
+{
+    "LED ON",
+    "LED OFF"
+};
+```
+
+A parametrização do cliente fica por conta do processo de botão que inicializa o contexto com o buffer, seu tamanho, o endereço do hostname, o serviço que deseja consumir e os callbacks preenchidos, nesse exemplo usaremos somente o de envio, não estando interessado na recepção, e assim passamos os argumentos para Button_Run iniciar o processo.
+```c
+TCP_Client_t client = 
+{
+    .buffer = client_buffer,
+    .buffer_size = BUFFER_SIZE,
+    .hostname = "127.0.0.1",
+    .port = 5555,
+    .cb.on_send = on_send        
+};
+
+Button_Run(&client, &button);
+```
+A implementação no evento de envio, recuperamos o estado recebido e alteramos e indexamos com a lista de comando para enviar a mensagem
+```c
+static int on_send(char *buffer, int *size, void *data)
+{
+    int *state = (int *)data;
+    snprintf(buffer, strlen(states[*state]) + 1, "%s",states[*state]);
+    *size = strlen(states[*state]) + 1;
+
+    return 0;
+}
+```
+
+### *led_process*
+A parametrização do servidor fica por conta do processo de LED que inicializa o contexto com o buffer, seu tamanho, a porta onde vai servir e os callbacks preenchidos, nesse exemplo usaremos somente o de recebimento, e assim passamos os argumentos para LED_Run iniciar o serviço.
+```c
+ TCP_Server_t server = 
+    {
+        .buffer = server_buffer,
+        .buffer_size = sizeof(server_buffer),
+        .port = 5555,
+        .cb.on_receive = on_receive_message
+    };
+
+    LED_Run(&server, &data);
+```
+
+A implementação no evento de recebimento da mensagem, compara a mensagem recebida com os comandos internos para o acionamento do LED, caso for igual executa a ação correspondente.
+
+```c
+static int on_receive_message(char *buffer, int size, void *user_data)
+{
+    LED_Data *led = (LED_Data *)user_data;
+
+    if(strncmp("LED ON", buffer, strlen("LED ON")) == 0)
+        led->interface->Set(led->object, 1);
+    else if(strncmp("LED OFF", buffer, strlen("LED OFF")) == 0)
+        led->interface->Set(led->object, 0);
+
+    return 0;
+}
+```
 
 ## Compilando, Executando e Matando os processos
 
@@ -97,7 +452,7 @@ Para que o exemplo funcione é necessário a criação do certificado, para cri�
 $ openssl req -x509 -nodes -days 365 -newkey rsa:1024 -keyout mycert.pem -out mycert.pem
 ```
 
-Esse certificado deve está no mesmo diretório que o binário, porém para facilitar a execução do exemplo, o exemplo possuí um certificado, ou seja, não é necessário criá-lo.
+O certificado deve está no mesmo diretório que os binários.
 
 ## Compilando
 Para facilitar a execução do exemplo, o exemplo proposto foi criado baseado em uma interface, onde é possível selecionar se usará o hardware da Raspberry Pi 3, ou se a interação com o exemplo vai ser através de input feito por FIFO e o output visualizado através de LOG.
@@ -224,28 +579,28 @@ sudo tcpdump -i lo -nnSX port 5555
 ```
 Após executar o comando o tcpdump ficará fazendo sniffing da interface, tudo o que for trafegado nessa interface será apresentado, dessa forma enviamos um comando e veremos a seguinte saída:
 ```bash
-15:03:18.093589 IP 127.0.0.1.41246 > 127.0.0.1.5555: Flags [S], seq 3442725707, win 65495, options [mss 65495,sackOK,TS val 2058943068 ecr 0,nop,wscale 7], length 0
-	0x0000:  4500 003c 6705 4000 4006 d5b4 7f00 0001  E..<g.@.@.......
-	0x0010:  7f00 0001 a11e 15b3 cd33 d34b 0000 0000  .........3.K....
+06:00:56.026933 IP 127.0.0.1.49976 > 127.0.0.1.5555: Flags [S], seq 4063409830, win 65495, options [mss 65495,sackOK,TS val 2112801002 ecr 0,nop,wscale 7], length 0
+	0x0000:  4500 003c 3f21 4000 4006 fd98 7f00 0001  E..<?!@.@.......
+	0x0010:  7f00 0001 c338 15b3 f232 b6a6 0000 0000  .....8...2......
 	0x0020:  a002 ffd7 fe30 0000 0204 ffd7 0402 080a  .....0..........
-	0x0030:  7ab8 fa5c 0000 0000 0103 0307            z..\........
-15:03:18.093601 IP 127.0.0.1.5555 > 127.0.0.1.41246: Flags [S.], seq 252259801, ack 3442725708, win 65483, options [mss 65495,sackOK,TS val 2058943068 ecr 2058943068,nop,wscale 7], length 0
+	0x0030:  7dee c8ea 0000 0000 0103 0307            }...........
+06:00:56.026944 IP 127.0.0.1.5555 > 127.0.0.1.49976: Flags [S.], seq 4020804078, ack 4063409831, win 65483, options [mss 65495,sackOK,TS val 2112801002 ecr 2112801002,nop,wscale 7], length 0
 	0x0000:  4500 003c 0000 4000 4006 3cba 7f00 0001  E..<..@.@.<.....
-	0x0010:  7f00 0001 15b3 a11e 0f09 2dd9 cd33 d34c  ..........-..3.L
+	0x0010:  7f00 0001 15b3 c338 efa8 99ee f232 b6a7  .......8.....2..
 	0x0020:  a012 ffcb fe30 0000 0204 ffd7 0402 080a  .....0..........
-	0x0030:  7ab8 fa5c 7ab8 fa5c 0103 0307            z..\z..\....
-15:03:18.093611 IP 127.0.0.1.41246 > 127.0.0.1.5555: Flags [.], ack 252259802, win 512, options [nop,nop,TS val 2058943068 ecr 2058943068], length 0
-	0x0000:  4500 0034 6706 4000 4006 d5bb 7f00 0001  E..4g.@.@.......
-	0x0010:  7f00 0001 a11e 15b3 cd33 d34c 0f09 2dda  .........3.L..-.
-	0x0020:  8010 0200 fe28 0000 0101 080a 7ab8 fa5c  .....(......z..\
-	0x0030:  7ab8 fa5c                                z..\
-15:03:18.093649 IP 127.0.0.1.41246 > 127.0.0.1.5555: Flags [P.], seq 3442725708:3442725947, ack 252259802, win 512, options [nop,nop,TS val 2058943068 ecr 2058943068], length 239
-	0x0000:  4500 0123 6707 4000 4006 d4cb 7f00 0001  E..#g.@.@.......
-	0x0010:  7f00 0001 a11e 15b3 cd33 d34c 0f09 2dda  .........3.L..-.
-	0x0020:  8018 0200 ff17 0000 0101 080a 7ab8 fa5c  ............z..\
-	0x0030:  7ab8 fa5c 1603 0100 ea01 0000 e603 03a9  z..\............
-	0x0040:  beff 93bf 5c9e e007 5fa8 bca0 f073 25ae  ....\..._....s%.
-	0x0050:  6e34 3394 5977 6048 fa6c 99d3 6a77 5a00  n43.Yw`H.l..jwZ.
+	0x0030:  7dee c8ea 7dee c8ea 0103 0307            }...}.......
+06:00:56.026953 IP 127.0.0.1.49976 > 127.0.0.1.5555: Flags [.], ack 4020804079, win 512, options [nop,nop,TS val 2112801002 ecr 2112801002], length 0
+	0x0000:  4500 0034 3f22 4000 4006 fd9f 7f00 0001  E..4?"@.@.......
+	0x0010:  7f00 0001 c338 15b3 f232 b6a7 efa8 99ef  .....8...2......
+	0x0020:  8010 0200 fe28 0000 0101 080a 7dee c8ea  .....(......}...
+	0x0030:  7dee c8ea                                }...
+06:00:56.026987 IP 127.0.0.1.49976 > 127.0.0.1.5555: Flags [P.], seq 4063409831:4063410070, ack 4020804079, win 512, options [nop,nop,TS val 2112801002 ecr 2112801002], length 239
+	0x0000:  4500 0123 3f23 4000 4006 fcaf 7f00 0001  E..#?#@.@.......
+	0x0010:  7f00 0001 c338 15b3 f232 b6a7 efa8 99ef  .....8...2......
+	0x0020:  8018 0200 ff17 0000 0101 080a 7dee c8ea  ............}...
+	0x0030:  7dee c8ea 1603 0100 ea01 0000 e603 03fb  }...............
+	0x0040:  b474 a881 d1e5 e15b 0d42 00d6 722b a672  .t.....[.B..r+.r
+	0x0050:  0574 e371 ae2e c010 e9c9 7aa3 9fdf 9500  .t.q......z.....
 	0x0060:  0068 c030 c02c c028 c024 c014 c00a 00a3  .h.0.,.(.$......
 	0x0070:  009f 006b 006a 0039 0038 0088 0087 c032  ...k.j.9.8.....2
 	0x0080:  c02e c02a c026 c00f c005 009d 003d 0035  ...*.&.......=.5
@@ -258,7 +613,141 @@ Após executar o comando o tcpdump ficará fazendo sniffing da interface, tudo o
 	0x00f0:  000c 0009 000a 0023 0000 000d 0020 001e  .......#........
 	0x0100:  0601 0602 0603 0501 0502 0503 0401 0402  ................
 	0x0110:  0403 0301 0302 0303 0201 0202 0203 000f  ................
-	0x0120:  0001 01
+	0x0120:  0001 01                                  ...
+06:00:56.033787 IP 127.0.0.1.5555 > 127.0.0.1.49976: Flags [P.], seq 4020804079:4020804907, ack 4063410070, win 512, options [nop,nop,TS val 2112801009 ecr 2112801002], length 828
+	0x0000:  4500 0370 ef90 4000 4006 49f5 7f00 0001  E..p..@.@.I.....
+	0x0010:  7f00 0001 15b3 c338 efa8 99ef f232 b796  .......8.....2..
+	0x0020:  8018 0200 0165 0000 0101 080a 7dee c8f1  .....e......}...
+	0x0030:  7dee c8ea 1603 0300 3a02 0000 3603 0302  }.......:...6...
+	0x0040:  f91f 6cc6 62c9 fdfe f727 d7ed a593 fd6a  ..l.b....'.....j
+	0x0050:  5b00 bc13 896a 6c45 50da f840 dda9 9600  [....jlEP..@....
+	0x0060:  009d 0000 0eff 0100 0100 0023 0000 000f  ...........#....
+	0x0070:  0001 0116 0303 02ef 0b00 02eb 0002 e800  ................
+	0x0080:  02e5 3082 02e1 3082 024a a003 0201 0202  ..0...0..J......
+	0x0090:  0900 fe7f 41f9 1431 d9fd 300d 0609 2a86  ....A..1..0...*.
+	0x00a0:  4886 f70d 0101 0b05 0030 8187 310b 3009  H........0..1.0.
+	0x00b0:  0603 5504 0613 0242 5231 1230 1006 0355  ..U....BR1.0...U
+	0x00c0:  0408 0c09 5361 6f20 5061 756c 6f31 0b30  ....Sao.Paulo1.0
+	0x00d0:  0906 0355 0407 0c02 5350 310e 300c 0603  ...U....SP1.0...
+	0x00e0:  5504 0a0c 0543 6f6c 6964 310e 300c 0603  U....Colid1.0...
+	0x00f0:  5504 0b0c 0553 6f6c 6964 310e 300c 0603  U....Solid1.0...
+	0x0100:  5504 030c 0553 6f6c 6964 3127 3025 0609  U....Solid1'0%..
+	0x0110:  2a86 4886 f70d 0109 0116 1863 7269 7374  *.H........crist
+	0x0120:  6961 6e6f 7373 7465 6340 676d 6169 6c2e  ianosstec@gmail.
+	0x0130:  636f 6d30 1e17 0d32 3130 3431 3131 3734  com0...210411174
+	0x0140:  3435 355a 170d 3232 3034 3131 3137 3434  455Z..2204111744
+	0x0150:  3535 5a30 8187 310b 3009 0603 5504 0613  55Z0..1.0...U...
+	0x0160:  0242 5231 1230 1006 0355 0408 0c09 5361  .BR1.0...U....Sa
+	0x0170:  6f20 5061 756c 6f31 0b30 0906 0355 0407  o.Paulo1.0...U..
+	0x0180:  0c02 5350 310e 300c 0603 5504 0a0c 0543  ..SP1.0...U....C
+	0x0190:  6f6c 6964 310e 300c 0603 5504 0b0c 0553  olid1.0...U....S
+	0x01a0:  6f6c 6964 310e 300c 0603 5504 030c 0553  olid1.0...U....S
+	0x01b0:  6f6c 6964 3127 3025 0609 2a86 4886 f70d  olid1'0%..*.H...
+	0x01c0:  0109 0116 1863 7269 7374 6961 6e6f 7373  .....cristianoss
+	0x01d0:  7465 6340 676d 6169 6c2e 636f 6d30 819f  tec@gmail.com0..
+	0x01e0:  300d 0609 2a86 4886 f70d 0101 0105 0003  0...*.H.........
+	0x01f0:  818d 0030 8189 0281 8100 a59c 2058 a828  ...0.........X.(
+	0x0200:  39f7 1ca9 e3b3 69da 37e2 7534 02f9 462f  9.....i.7.u4..F/
+	0x0210:  ec2f 5a50 5304 3f1e a654 3767 cee8 2941  ./ZPS.?..T7g..)A
+	0x0220:  9dbe 0116 0855 66f7 7902 ec55 a50b 3014  .....Uf.y..U..0.
+	0x0230:  88ba 91bb 3568 1766 095d f3f2 4089 4303  ....5h.f.]..@.C.
+	0x0240:  baef 264b b0a8 510b 1bc5 798c 7e8d ac43  ..&K..Q...y.~..C
+	0x0250:  58f1 c1d5 1890 fe9f 9c10 d7d5 7dc1 c297  X...........}...
+	0x0260:  efcb 057a 3802 506a 85fa d111 01a8 2fc8  ...z8.Pj....../.
+	0x0270:  9217 f033 222f 4b79 d047 0203 0100 01a3  ...3"/Ky.G......
+	0x0280:  5330 5130 1d06 0355 1d0e 0416 0414 ad6a  S0Q0...U.......j
+	0x0290:  bdb4 ba85 862c 4757 f5f2 8e72 c017 eca4  .....,GW...r....
+	0x02a0:  a67b 301f 0603 551d 2304 1830 1680 14ad  .{0...U.#..0....
+	0x02b0:  6abd b4ba 8586 2c47 57f5 f28e 72c0 17ec  j.....,GW...r...
+	0x02c0:  a4a6 7b30 0f06 0355 1d13 0101 ff04 0530  ..{0...U.......0
+	0x02d0:  0301 01ff 300d 0609 2a86 4886 f70d 0101  ....0...*.H.....
+	0x02e0:  0b05 0003 8181 003c e79b ebb1 c161 429a  .......<.....aB.
+	0x02f0:  b6a2 5dd5 1da1 5847 b8f8 e930 afe7 9c4d  ..]...XG...0...M
+	0x0300:  56a2 0305 9238 49d7 acef e3ec f311 730e  V....8I.......s.
+	0x0310:  86ee 8f84 9ac7 08d9 ca21 d55a a27b 9c11  .........!.Z.{..
+	0x0320:  f773 cb26 e5ba 429c 5b1e 48ef 3faf 2240  .s.&..B.[.H.?."@
+	0x0330:  0b9d af33 0bab 4fc7 6ec7 ab56 208f 8816  ...3..O.n..V....
+	0x0340:  b903 e8a6 6599 35b7 0f69 5753 0a7a 026c  ....e.5..iWS.z.l
+	0x0350:  5308 36e0 ca69 5fd0 618d 7170 9f1e 6872  S.6..i_.a.qp..hr
+	0x0360:  d250 7e7f 8d66 2716 0303 0004 0e00 0000  .P~..f'.........
+06:00:56.033797 IP 127.0.0.1.49976 > 127.0.0.1.5555: Flags [.], ack 4020804907, win 506, options [nop,nop,TS val 2112801009 ecr 2112801009], length 0
+	0x0000:  4500 0034 3f24 4000 4006 fd9d 7f00 0001  E..4?$@.@.......
+	0x0010:  7f00 0001 c338 15b3 f232 b796 efa8 9d2b  .....8...2.....+
+	0x0020:  8010 01fa fe28 0000 0101 080a 7dee c8f1  .....(......}...
+	0x0030:  7dee c8f1                                }...
+06:00:56.034063 IP 127.0.0.1.49976 > 127.0.0.1.5555: Flags [P.], seq 4063410070:4063410260, ack 4020804907, win 512, options [nop,nop,TS val 2112801009 ecr 2112801009], length 190
+	0x0000:  4500 00f2 3f25 4000 4006 fcde 7f00 0001  E...?%@.@.......
+	0x0010:  7f00 0001 c338 15b3 f232 b796 efa8 9d2b  .....8...2.....+
+	0x0020:  8018 0200 fee6 0000 0101 080a 7dee c8f1  ............}...
+	0x0030:  7dee c8f1 1603 0300 8610 0000 8200 8068  }..............h
+	0x0040:  3308 082b 7a48 0937 ff2a fa59 09bd 2958  3..+zH.7.*.Y..)X
+	0x0050:  655c 10ed 7cb2 c467 cab1 6c76 d03d d4c8  e\..|..g..lv.=..
+	0x0060:  56a1 3793 a7ed 6b9a a367 4258 5d87 ced0  V.7...k..gBX]...
+	0x0070:  7b7c dc4b 7908 77fa 9bb5 f6d8 8477 6257  {|.Ky.w......wbW
+	0x0080:  7da4 7cad d1ad cfdb 3246 6ce4 3b5d d84b  }.|.....2Fl.;].K
+	0x0090:  cd0e c3de 5079 c37d 24f2 e568 4cd5 a2f4  ....Py.}$..hL...
+	0x00a0:  c77c 7825 7d89 707e 4abc 4bc3 e885 6f5e  .|x%}.p~J.K...o^
+	0x00b0:  74ad 95b8 ae12 c9f0 6890 1d95 83db d614  t.......h.......
+	0x00c0:  0303 0001 0116 0303 0028 cb96 f453 6471  .........(...Sdq
+	0x00d0:  ff05 f6dd b20c 9cef 8f0b 60ba b8ee 169c  ..........`.....
+	0x00e0:  cfc4 380e eae8 1738 25d6 7c19 0b9f 2eb6  ..8....8%.|.....
+	0x00f0:  3cce                                     <.
+06:00:56.034072 IP 127.0.0.1.5555 > 127.0.0.1.49976: Flags [.], ack 4063410260, win 511, options [nop,nop,TS val 2112801009 ecr 2112801009], length 0
+	0x0000:  4500 0034 ef91 4000 4006 4d30 7f00 0001  E..4..@.@.M0....
+	0x0010:  7f00 0001 15b3 c338 efa8 9d2b f232 b854  .......8...+.2.T
+	0x0020:  8010 01ff fe28 0000 0101 080a 7dee c8f1  .....(......}...
+	0x0030:  7dee c8f1                                }...
+06:00:56.034376 IP 127.0.0.1.5555 > 127.0.0.1.49976: Flags [P.], seq 4020804907:4020805133, ack 4063410260, win 512, options [nop,nop,TS val 2112801009 ecr 2112801009], length 226
+	0x0000:  4500 0116 ef92 4000 4006 4c4d 7f00 0001  E.....@.@.LM....
+	0x0010:  7f00 0001 15b3 c338 efa8 9d2b f232 b854  .......8...+.2.T
+	0x0020:  8018 0200 ff0a 0000 0101 080a 7dee c8f1  ............}...
+	0x0030:  7dee c8f1 1603 0300 aa04 0000 a600 001c  }...............
+	0x0040:  2000 a06f d36a ed5b 3d96 f423 0996 df8a  ...o.j.[=..#....
+	0x0050:  151b b9c2 6826 e5f9 fa1a 4610 8715 5bd7  ....h&....F...[.
+	0x0060:  3166 493d a4c3 99c2 e139 eacb cff4 29c7  1fI=.....9....).
+	0x0070:  4fc9 ca94 f56c b2f3 6f43 00d9 2e9f b502  O....l..oC......
+	0x0080:  c8f1 0459 c937 ffa7 de37 afa0 572b 34d5  ...Y.7...7..W+4.
+	0x0090:  3579 0e7d 7bee a0e3 4bae 0e02 9759 0337  5y.}{...K....Y.7
+	0x00a0:  4ff4 a853 2270 da75 2e4d 3fb8 8c50 1615  O..S"p.u.M?..P..
+	0x00b0:  73ec 260c 38bc 74df eca5 1754 95c7 95d8  s.&.8.t....T....
+	0x00c0:  8811 cadf 4b3a bd23 9efd c918 a729 86c1  ....K:.#.....)..
+	0x00d0:  e92b 03ad 8b3b 21be 12e1 8fd6 7834 2a5d  .+...;!.....x4*]
+	0x00e0:  1a66 d314 0303 0001 0116 0303 0028 03cd  .f...........(..
+	0x00f0:  a116 864e 2df1 f5f2 aa55 6c58 3602 9bd6  ...N-....UlX6...
+	0x0100:  45e4 ee4b 2699 482f e26b 2a35 8df8 51b4  E..K&.H/.k*5..Q.
+	0x0110:  e272 bcad 6e8a                           .r..n.
+06:00:56.034383 IP 127.0.0.1.49976 > 127.0.0.1.5555: Flags [.], ack 4020805133, win 511, options [nop,nop,TS val 2112801009 ecr 2112801009], length 0
+	0x0000:  4500 0034 3f26 4000 4006 fd9b 7f00 0001  E..4?&@.@.......
+	0x0010:  7f00 0001 c338 15b3 f232 b854 efa8 9e0d  .....8...2.T....
+	0x0020:  8010 01ff fe28 0000 0101 080a 7dee c8f1  .....(......}...
+	0x0030:  7dee c8f1                                }...
+06:00:56.034464 IP 127.0.0.1.49976 > 127.0.0.1.5555: Flags [P.], seq 4063410260:4063410297, ack 4020805133, win 512, options [nop,nop,TS val 2112801009 ecr 2112801009], length 37
+	0x0000:  4500 0059 3f27 4000 4006 fd75 7f00 0001  E..Y?'@.@..u....
+	0x0010:  7f00 0001 c338 15b3 f232 b854 efa8 9e0d  .....8...2.T....
+	0x0020:  8018 0200 fe4d 0000 0101 080a 7dee c8f1  .....M......}...
+	0x0030:  7dee c8f1 1703 0300 20cb 96f4 5364 71ff  }...........Sdq.
+	0x0040:  06c3 539b 5a89 c225 c376 17c2 6f39 c8b9  ..S.Z..%.v..o9..
+	0x0050:  9be0 81af d9d4 e344 e5                   .......D.
+06:00:56.034473 IP 127.0.0.1.5555 > 127.0.0.1.49976: Flags [.], ack 4063410297, win 512, options [nop,nop,TS val 2112801009 ecr 2112801009], length 0
+	0x0000:  4500 0034 ef93 4000 4006 4d2e 7f00 0001  E..4..@.@.M.....
+	0x0010:  7f00 0001 15b3 c338 efa8 9e0d f232 b879  .......8.....2.y
+	0x0020:  8010 0200 fe28 0000 0101 080a 7dee c8f1  .....(......}...
+	0x0030:  7dee c8f1                                }...
+06:00:56.034498 IP 127.0.0.1.49976 > 127.0.0.1.5555: Flags [F.], seq 4063410297, ack 4020805133, win 512, options [nop,nop,TS val 2112801009 ecr 2112801009], length 0
+	0x0000:  4500 0034 3f28 4000 4006 fd99 7f00 0001  E..4?(@.@.......
+	0x0010:  7f00 0001 c338 15b3 f232 b879 efa8 9e0d  .....8...2.y....
+	0x0020:  8011 0200 fe28 0000 0101 080a 7dee c8f1  .....(......}...
+	0x0030:  7dee c8f1                                }...
+06:00:56.034542 IP 127.0.0.1.5555 > 127.0.0.1.49976: Flags [F.], seq 4020805133, ack 4063410298, win 512, options [nop,nop,TS val 2112801009 ecr 2112801009], length 0
+	0x0000:  4500 0034 ef94 4000 4006 4d2d 7f00 0001  E..4..@.@.M-....
+	0x0010:  7f00 0001 15b3 c338 efa8 9e0d f232 b87a  .......8.....2.z
+	0x0020:  8011 0200 fe28 0000 0101 080a 7dee c8f1  .....(......}...
+	0x0030:  7dee c8f1                                }...
+06:00:56.034553 IP 127.0.0.1.49976 > 127.0.0.1.5555: Flags [.], ack 4020805134, win 512, options [nop,nop,TS val 2112801009 ecr 2112801009], length 0
+	0x0000:  4500 0034 3f29 4000 4006 fd98 7f00 0001  E..4?)@.@.......
+	0x0010:  7f00 0001 c338 15b3 f232 b87a efa8 9e0e  .....8...2.z....
+	0x0020:  8010 0200 fe28 0000 0101 080a 7dee c8f1  .....(......}...
+	0x0030:  7dee c8f1 
   ```
 
 Podemos ver que há o processo de _handshake_ seguido do envio da mensagem, como descritos a seguir:
