@@ -3,12 +3,8 @@
 
 #include <stdbool.h>
 #include <stdlib.h>
+#include <tcp_interface.h>
 
-typedef struct 
-{
-    int (*on_receive)(void *buffer, int size, void *user_data);
-    int (*on_send)(char *buffer, int *size, void *user_data);
-} TCP_Callback_t;
 
 typedef struct 
 {
