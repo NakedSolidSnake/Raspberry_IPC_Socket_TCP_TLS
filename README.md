@@ -59,6 +59,7 @@ OpenSSL é uma ferramente de criptografia que implementa os protocolos SSL e TLS
 ## tcpdump 
 O tcpdump é uma ferramenta capaz de monitorar o tráfego de dados em uma dada interface como por exemplo eth0, com ele é possível analisar os pacotes que são recebido e enviados
 
+## Implementação
 Para demonstrar o uso desse IPC, iremos utilizar o modelo Cliente/Servidor, onde o processo Cliente(_button_process_) vai enviar uma mensagem com comandos pré-determinados para o servidor, e o Servidor(_led_process_) vai ler as mensagens e verificar se possui o comando cadastrado, assim o executando.
 Para melhor isolar as implementações do servidor e do cliente foi criado uma biblioteca, que abstrai a rotina de inicialização e execução do servidor, e a rotina de conexão por parte do cliente.
 
@@ -78,16 +79,19 @@ typedef struct
 
 #### tcp_server.h
 
-Criamos também um contexto que armazena os paramêtros utilizados pelo servidor, sendo o _socket_ para armazenar a instância criada, _port_ que recebe o número que corresponde onde o serviço será disponibilizado, _buffer_ que aponta para a memória alocada previamente pelo usuário, *buffer_size* o representa o tamanho do _buffer_ e a interface das funções de _callback_
+Criamos também um contexto que armazena os paramêtros utilizados pelo servidor, sendo o _socket_ para armazenar a instância criada, _port_ que recebe o número que corresponde onde o serviço será disponibilizado, _buffer_ que aponta para a memória alocada previamente pelo usuário, *buffer_size* o representa o tamanho do _buffer_, a interface das funções de _callback_, *ssl_context* que receberá a instância do contexto SSL, _certificate_ que recebe o certificado e _key_ que recebe a chave usada na criptografia.
 
 ```c
 typedef struct
 {
     int socket;
     int port;
-    char *buffer;
+    char *buffer;    
     int buffer_size;
     TCP_Callback_t cb;
+    void *ssl_context;
+    const char *certificate;
+    const char *key;
 } TCP_Server_t;
 ```
 
@@ -99,6 +103,10 @@ bool TCP_Server_Init(TCP_Server_t *server);
 Essa função aguarda uma conexão e realiza a comunicação com o cliente.
 ```c
 bool TCP_Server_Exec(TCP_Server_t *server, void *data);
+```
+Essa função libera o contexto alocado pelo SSL
+```c
+bool TCP_Server_Cleanup(TCP_Server_t *server);
 ```
 #### tcp_server.c
 
@@ -115,6 +123,22 @@ Para realizar a inicialização é criado um dummy do while, para que quando hou
 if(!server || !server->buffer)
     break;
 ```
+
+Inicializamos o SSL e inicializamos o seu contexto
+```c
+SSL_library_init();
+
+server->ssl_context = ssl_context_init();
+if(!server->ssl_context)
+    break;
+```
+
+Carregamos o certificado
+```c
+if(ssl_load_certificates(server->ssl_context, (char *)server->certificate, (char *)server->key) == false)
+    break;
+```
+
 Criamos um endpoint com o perfil de se conectar via protocolo IPv4(AF_INET), do tipo stream que caracteriza o TCP(SOCK_STREAM), o último parâmetro pode ser 0 nesse caso.
 ```c
 server->socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -156,6 +180,7 @@ status = true;
 Na função TCP_Server_Exec declaramos algumas variáveis para realizar a conexão e comunicação com o cliente
 
 ```c
+SSL *ssl;
 struct sockaddr_in address;
 socklen_t addr_len = sizeof(address);
 int client_socket;
@@ -170,9 +195,17 @@ client_socket = accept(server->socket, (struct sockaddr *)&address, &addr_len);
 if(client_socket > 0)
 ```
 
+Realizamos o _handshake_ SSL caso ocorrer com sucesso inicia a troca de mensagens
+```c
+ssl = SSL_new(server->ssl_context);
+SSL_set_fd(ssl, client_socket);
+
+if(SSL_accept(ssl) >= 0)
+```
+
 O Servidor aguarda a troca de mensagem, assim que receber realiza a verificação se o callback para recebimento foi preenchido caso sim, passa o conteúdo para o callback realizar o tratamento.
 ```c
-read_len = recv(client_socket, server->buffer, server->buffer_size, 0);
+read_len = SSL_read(ssl, server->buffer, server->buffer_size);
 if(server->cb.on_receive)
 {
     server->cb.on_receive(server->buffer, read_len, data);
@@ -183,17 +216,33 @@ Aqui é verificado se o callback para envio foi configurado, dessa forma o buffe
 if(server->cb.on_send)
 {
     server->cb.on_send(server->buffer, &write_len, data);
-    send(client_socket, server->buffer, (int)fmin(write_len, server->buffer_size), 0);
+    SSL_write(ssl, server->buffer, (int)fmin(write_len, server->buffer_size));
 }
 
 status = true;
 ``` 
 
-Interrompemos qualquer nova transação e fechamos o socket usado, concluindo a comunicação
+Liberamos o ssl alocado para o cliente e interrompemos qualquer nova transação e fechamos o socket usado, concluindo a comunicação
 ```c
+SSL_free(ssl);
 shutdown(client_socket, SHUT_RDWR);
 close(client_socket);
 ``` 
+
+Na função TCP_Server_Cleanup liberamos o contexto alocado no TCP_Server_Init
+```c
+bool status = false;
+
+close(server->socket);
+
+if(server->ssl_context)
+{
+    SSL_CTX_free(server->ssl_context);
+    status = true;        
+}
+
+return status;
+```
 
 #### tcp_client.h
 Criamos também um contexto que armazena os paramêtros utilizados pelo cliente, sendo o _socket_ para armazenar a instância criada, _hostname_ é o ip que da máquina que vai ser conectar, _port_ que recebe o número que corresponde qual o serviço deseja consumir, _buffer_ que aponta para a memória alocada previamente pelo usuário, *buffer_size* o representa o tamanho do _buffer_ e a interface das funções de _callback_
@@ -210,15 +259,29 @@ typedef struct
 } TCP_Client_t;
 ```
 
+Essa função inicializa a biblioteca SSL
+```c
+bool TCP_Client_Init(TCP_Client_t *client);
+```
+
 Essa função realiza a conexão, envio e recebimento de mensagens para o servidor configurado
 ```c
 bool TCP_Client_Connect(TCP_Client_t *client, void *data);
 ```
 
 #### tcp_client.c
+Na função TCP_Client_Init inicializamos a biblioteca SSL
+```c
+(void)client;
+SSL_library_init();
+return true;
+```
+
 Na função TCP_Client_Connect definimos algumas váriaveis para auxiliar na comunicação com o servidor, sendo uma variável booleana que representa o estado da parametrização do cliente, uma variável do tipo inteiro que recebe o resultado das funções necessárias para a configuração, uma estrutura sockaddr_in que é usada para configurar o servidor no qual será conectado, e duas variáveis de quantidade de dados enviados e recebidos.
 
 ```c
+SSL_CTX *ssl_context;
+SSL *ssl;
 bool status = false;
 int is_valid;
 struct sockaddr_in server;
@@ -229,6 +292,11 @@ Verificamos se o contexto e o buffer do cliente foram inicializados
 ```c
 if(!client || !client->buffer || client->buffer_size <= 0)
     break;
+```
+
+Inicializamos o contexto SSL
+```c
+ssl_context = ssl_context_init();
 ```
 
 Criamos um endpoint com o perfil de se conectar via protocolo IPv4(AF_INET), do tipo stream que caracteriza o TCP(SOCK_STREAM), o último parâmetro pode ser 0 nesse caso.
@@ -259,6 +327,17 @@ if(is_valid < 0)
 status = true;
 ```
 
+Adquirimos uma instância do SSL, aplicamos ao socket e realizamos um connect ao servidor
+```c
+ssl = SSL_new(ssl_context);
+if(!ssl)
+    break;
+
+SSL_set_fd(ssl, client->socket);
+if(SSL_connect(ssl) == -1)
+    break;
+```
+
 Aqui verificamos se a inicialização ocorreu com sucesso e se o callback para envio foi preenchido
 ```c
 if( status && client->cb.on_send)
@@ -266,21 +345,24 @@ if( status && client->cb.on_send)
 Em caso de sucesso passamos o contexto para a implementação feita pelo usuário para preparar o dados a ser enviado para o servidor
 ```c
 client->cb.on_send(client->buffer, &send_size, data);
-send(client->socket, client->buffer, (int)fmin(send_size, client->buffer_size), 0);
+SSL_write(ssl, client->buffer, (int)fmin(send_size, client->buffer_size));
 ```
 
 Se o callback para o recebimento foi preenchido passamos o contexto para a implementação do usuário tratar a resposta
 ```c
 if(client->cb.on_receive)
 {
-    recv_size = recv(client->socket, client->buffer, client->buffer_size, 0);
+    recv_size = SSL_read(ssl, client->buffer, client->buffer_size);
+    client->buffer[recv_size] = '\0';
     client->cb.on_receive(client->buffer, recv_size, data);
 }
 ```
-Por fim interrompemos qualquer nova transação e fechamos o socket e retornamos o status
+Por fim liberamos a instância do SSL, interrompemos qualquer nova transação, fechamos o socket, e liberamos o contexto SSL e retornamos o status
 ```c
+SSL_free(ssl);
 shutdown(client->socket, SHUT_RDWR);
 close(client->socket);
+SSL_CTX_free(ssl_context);
 
 return status;
 ```
@@ -328,7 +410,7 @@ if(pid_led == 0)
 ```
 
 ### *button_interface*
-A implementação do Button_Run ficou simples, onde realizamos a inicialização do interface de botão e ficamos em loop aguardando o pressionamento do botão para alterar o estado da variável e enviar a mensagem para o servidor
+A implementação do Button_Run ficou simples, onde realizamos a inicialização do interface de botão, inicializamos o cliente e ficamos em loop aguardando o pressionamento do botão para alterar o estado da variável e enviar a mensagem para o servidor
 ```c
 bool Button_Run(TCP_Client_t *client, Button_Data *button)
 {
@@ -336,6 +418,8 @@ bool Button_Run(TCP_Client_t *client, Button_Data *button)
 
     if(button->interface->Init(button->object) == false)
         return false;
+
+    TCP_Client_Init(client);
 
     while(true)
     {
@@ -394,21 +478,23 @@ A implementação no evento de envio, recuperamos o estado recebido e alteramos 
 static int on_send(char *buffer, int *size, void *data)
 {
     int *state = (int *)data;
+    memset(buffer, 0, BUFFER_SIZE);
     snprintf(buffer, strlen(states[*state]) + 1, "%s",states[*state]);
     *size = strlen(states[*state]) + 1;
-
     return 0;
 }
 ```
 
 ### *led_process*
-A parametrização do servidor fica por conta do processo de LED que inicializa o contexto com o buffer, seu tamanho, a porta onde vai servir e os callbacks preenchidos, nesse exemplo usaremos somente o de recebimento, e assim passamos os argumentos para LED_Run iniciar o serviço.
+A parametrização do servidor fica por conta do processo de LED que inicializa o contexto com o buffer, seu tamanho, a porta onde vai servir, os callbacks preenchidos e o caminho do certificado nesse exemplo usaremos somente o de recebimento, e assim passamos os argumentos para LED_Run iniciar o serviço.
 ```c
  TCP_Server_t server = 
     {
+        .port = 5555,
         .buffer = server_buffer,
         .buffer_size = sizeof(server_buffer),
-        .port = 5555,
+        .certificate = "mycert.pem",
+        .key = "mycert.pem",
         .cb.on_receive = on_receive_message
     };
 
@@ -452,7 +538,7 @@ Para que o exemplo funcione é necessário a criação do certificado, para cri�
 $ openssl req -x509 -nodes -days 365 -newkey rsa:1024 -keyout mycert.pem -out mycert.pem
 ```
 
-O certificado deve está no mesmo diretório que os binários.
+Obs: O certificado deve estar no mesmo diretório que os binários.
 
 ## Compilando
 Para facilitar a execução do exemplo, o exemplo proposto foi criado baseado em uma interface, onde é possível selecionar se usará o hardware da Raspberry Pi 3, ou se a interação com o exemplo vai ser através de input feito por FIFO e o output visualizado através de LOG.
@@ -750,11 +836,7 @@ Após executar o comando o tcpdump ficará fazendo sniffing da interface, tudo o
 	0x0030:  7dee c8f1 
   ```
 
-Podemos ver que há o processo de _handshake_ seguido do envio da mensagem, como descritos a seguir:
-* No instante 15:03:18.093589 IP 127.0.0.1.41246 > 127.0.0.1.5555 o cliente envia uma SYN para o server
-* No instante 15:03:18.093601 IP 127.0.0.1.5555 > 127.0.0.1.41246 o servidor responde com um SYN ACK.
-* No instante 15:03:18.093611 IP 127.0.0.1.41246 > 127.0.0.1.5555 o cliente envia um ACK para o servidor.
-* E por fim, no instante 15:03:18.093649 IP 127.0.0.1.41246 > 127.0.0.1.5555 o cliente envia a mensagem porém diferente do artigo sobre [TCP](https://github.com/NakedSolidSnake/Raspberry_IPC_Socket_TCP) não é possível ver a mensagem, pois está encriptada.
+Podemos ver que há o processo de _handshake_ SSL seguido do envio da mensagem, como envia a mensagem porém diferente do artigo sobre [TCP](https://github.com/NakedSolidSnake/Raspberry_IPC_Socket_TCP) não é possível ver a mensagem, pois está encriptada.
 
 ## Testando conexão com o servidor via openssl
 A aplicação realiza a comunicação entre processos locais, para testar uma comunicação remota usaremos o openssl que permite se conectar de forma prática ao servidor que contenha certificado e enviar os comandos. Para se conectar basta usar o seguinte comando:
@@ -858,7 +940,7 @@ $ ./kill_process.sh
 ```
 
 ## Conclusão
-Preencher
+Além de ser o melhor IPC por permitir conectar dois processos em máquinas distintas, ainda é capaz de oferecer segurança para a transmissão de mensagens entre as máquinas envolvidas. Para aumentar a segurança ainda é possível aplicar criptografia sobre as mensagens para saber mais, aqui no embarcados existe um artigo [Intel Edison – Princípios básicos de comunicação segura via Socket TCP usando OpenSSL e AES 256 em C](https://www.embarcados.com.br/intel-edison-comunicacao-segura-openssl/) escrito pelo Pedro Bertoleti onde ele explica como fazer.
 
 ## Referência
 * [Link do projeto completo](https://github.com/NakedSolidSnake/Raspberry_IPC_Socket_TCP_TLS)
