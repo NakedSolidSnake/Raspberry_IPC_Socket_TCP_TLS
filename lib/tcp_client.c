@@ -82,7 +82,7 @@ bool TCP_Client_Connect(TCP_Client_t *client, void *data)
     close(client->socket);     
     SSL_CTX_free(ssl_context);   
 
-    return false;
+    return status;
 }
 
 static void *ssl_context_init(void)
