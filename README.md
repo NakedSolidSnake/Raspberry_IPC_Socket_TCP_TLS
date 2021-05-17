@@ -836,7 +836,7 @@ Após executar o comando o tcpdump ficará fazendo sniffing da interface, tudo o
 	0x0030:  7dee c8f1 
   ```
 
-Podemos ver que há o processo de _handshake_ SSL seguido do envio da mensagem, como envia a mensagem porém diferente do artigo sobre [TCP](https://github.com/NakedSolidSnake/Raspberry_IPC_Socket_TCP) não é possível ver a mensagem, pois está encriptada.
+Podemos ver que há o processo de _handshake_ SSL seguido do envio da mensagem, diferente do artigo [TCP](https://github.com/NakedSolidSnake/Raspberry_IPC_Socket_TCP) não é possível ver a mensagem, pois está criptografada.
 
 ## Testando conexão com o servidor via openssl
 A aplicação realiza a comunicação entre processos locais, para testar uma comunicação remota usaremos o openssl que permite se conectar de forma prática ao servidor que contenha certificado e enviar os comandos. Para se conectar basta usar o seguinte comando:
@@ -940,7 +940,7 @@ $ ./kill_process.sh
 ```
 
 ## Conclusão
-Além de ser o melhor IPC por permitir conectar dois processos em máquinas distintas, ainda é capaz de oferecer segurança para a transmissão de mensagens entre as máquinas envolvidas. Para aumentar a segurança ainda é possível aplicar criptografia sobre as mensagens para saber mais, aqui no embarcados existe um artigo [Intel Edison – Princípios básicos de comunicação segura via Socket TCP usando OpenSSL e AES 256 em C](https://www.embarcados.com.br/intel-edison-comunicacao-segura-openssl/) escrito pelo Pedro Bertoleti onde ele explica como fazer.
+Além de ser o melhor IPC por permitir conectar dois processos em máquinas distintas, ainda é capaz de oferecer mecanismos de segurança para a transmissão de mensagens de forma segura entre as máquinas envolvidas. Para aumentar a segurança ainda é possível aplicar criptografia sobre as mensagens. Para saber mais, aqui no embarcados existe um artigo [Intel Edison – Princípios básicos de comunicação segura via Socket TCP usando OpenSSL e AES 256 em C](https://www.embarcados.com.br/intel-edison-comunicacao-segura-openssl/) escrito pelo Pedro Bertoleti onde ele explica como fazer.
 
 ## Referência
 * [Link do projeto completo](https://github.com/NakedSolidSnake/Raspberry_IPC_Socket_TCP_TLS)
