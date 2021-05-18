@@ -25,17 +25,17 @@
 * [Referência](#referência)
 
 ## Introdução
-No artigo anterior sobre [TCP](https://github.com/NakedSolidSnake/Raspberry_IPC_Socket_TCP) foi demonstrado como ocorre o processo de comunicação desse IPC, porém conforme descrito no artigo é possível notar que os dados trafegam de forma legível(plaintext), sendo possível realizar a leitura sem maiores problemas. Existem aplicações que a exposição desses dados resulta no compromentimento da aplicação, permitindo que "curiosos" bisbilhotem. Para garantir que os dados não serão capturados e usados de forma ilícita existe uma forma de proteger os dados através da criptografia. Neste artigo será demonstrado como implementar esse IPC usando SSL para proteger as mensagens transitadas. Esse artigo foi baseado/traduzido nesse [exemplo](https://aticleworld.com/ssl-server-client-using-openssl-in-c/).
+No artigo anterior sobre [TCP](https://github.com/NakedSolidSnake/Raspberry_IPC_Socket_TCP) foi demonstrado como ocorre o processo de comunicação desse IPC, porém conforme descrito no artigo é possível notar que os dados trafegam de forma legível(plaintext), sendo possível realizar a leitura sem maiores problemas. Existem aplicações que a exposição desses dados resulta no compromentimento da aplicação, permitindo que "curiosos" bisbilhotem. Para garantir que os dados não serão capturados e usados de forma ilícita existe uma forma de proteger os dados através da criptografia. Neste artigo será demonstrado como implementar esse IPC usando SSL para proteger as mensagens transitadas. Esse artigo foi baseado/traduzido de acordo com esse [exemplo](https://aticleworld.com/ssl-server-client-using-openssl-in-c/).
 
 ## O Que é SSL
 SSL significa _Secure Sockets Layer_ que é um protocolo usado para estabelecer uma conexão criptografada entre um servidor e um cliente. Após estabelecer a conexão, o SSL garante que os dados transmitidos entre o cliente e o servidor estão seguros.
 
 ## Funcionamento SSL
-SSL usa algoritmo de criptografia assimétrica para progeter a transmissão dos dados. Estes algoritmos usam um par de chaves sendo uma pública e outra privada. A chave pública fica disponível e conhecida por qualquer um. A chave privada é conhecida somente pelo servidor ou pelo cliente. Com o SSL a mensagem criptografada pela chave pública pode ser descriptografada somente pela chave privada e a mensagem criptografada pela chave privada pode ser descriptografada pela chave pública.
+SSL usa algoritmo de criptografia assimétrica para progeter a transmissão dos dados. Estes algoritmos usam um par de chaves sendo uma pública e outra privada. A chave pública fica disponível e conhecida por qualquer um. A chave privada é conhecida somente por uma das partes podendo ser o servidor ou o cliente. Com o SSL a mensagem criptografada pela chave pública pode ser descriptografada somente pela chave privada e a mensagem criptografada pela chave privada pode ser descriptografada pela chave pública.
 
 
 ## Handshake SSL
-O processo de _handshake_ ocorre em 8 passos antes do início da troca de mensagens entre as parte, para melhr saber como ocorre esse processo a IBM possui um artigo muito explicativo podendo ser acessado [aqui](https://www.ibm.com/docs/pt-br/ibm-mq/8.0?topic=ssl-overview-tls-handshake).
+O processo de _handshake_ ocorre em 8 passos antes do início da troca de mensagens entre as parte, para melhor saber como ocorre esse processo a IBM possui um artigo bem explicativo podendo ser acessado [aqui](https://www.ibm.com/docs/pt-br/ibm-mq/8.0?topic=ssl-overview-tls-handshake).
 
 
 ## Preparação do Ambiente
@@ -79,7 +79,7 @@ typedef struct
 
 #### tcp_server.h
 
-Criamos também um contexto que armazena os paramêtros utilizados pelo servidor, sendo o _socket_ para armazenar a instância criada, _port_ que recebe o número que corresponde onde o serviço será disponibilizado, _buffer_ que aponta para a memória alocada previamente pelo usuário, *buffer_size* o representa o tamanho do _buffer_, a interface das funções de _callback_, *ssl_context* que receberá a instância do contexto SSL, _certificate_ que recebe o certificado e _key_ que recebe a chave usada na criptografia.
+Criamos também um contexto que armazena os paramêtros utilizados pelo servidor, sendo o _socket_ para armazenar a instância criada, _port_ que recebe o número que corresponde onde o serviço será disponibilizado, _buffer_ que aponta para a memória alocada previamente pelo usuário, *buffer_size* que representa o tamanho do _buffer_, a interface das funções de _callback_, *ssl_context* que receberá a instância do contexto SSL, _certificate_ que recebe o certificado e _key_ que recebe a chave usada na criptografia.
 
 ```c
 typedef struct
@@ -110,14 +110,14 @@ bool TCP_Server_Cleanup(TCP_Server_t *server);
 ```
 #### tcp_server.c
 
-No TCP_Server_Init definimos algumas váriaveis para auxiliar na inicialização do servidor, sendo uma variável booleana que representa o estado da inicialização do servidor, uma variável do tipo inteiro que recebe o resultado das funções necessárias para a configuração, uma variável do tipo inteiro para habilitar o reuso da porta caso o servidor precise reiniciar e uma estrutura sockaddr_in que é usada para configurar o servidor para se comunicar através da rede.
+No TCP_Server_Init definimos algumas variáveis para auxiliar na inicialização do servidor, sendo uma variável booleana que representa o estado da inicialização do servidor, uma variável do tipo inteiro que recebe o resultado das funções necessárias para a configuração, uma variável do tipo inteiro para habilitar o reuso da porta caso o servidor precise reiniciar e uma estrutura sockaddr_in que é usada para configurar o servidor para se comunicar através da rede.
 ```c
 bool status = false;
 int is_valid;
 int enable_reuse = 1;
 struct sockaddr_in address;
 ```
-Para realizar a inicialização é criado um dummy do while, para que quando houver falha em qualquer uma das etapas, irá sair da função com status de erro, nesse ponto verificamos se o contexto e o buffer foi inicializado, que é de reponsabilidade do usuário
+Para realizar a inicialização é criado um dummy do while, para que quando houver falha em qualquer uma das etapas, irá sair da função com status de erro, nesse ponto verificamos se o contexto e o buffer foi inicializado, que é de responsabilidade do usuário
 
 ```c
 if(!server || !server->buffer)
@@ -245,7 +245,7 @@ return status;
 ```
 
 #### tcp_client.h
-Criamos também um contexto que armazena os paramêtros utilizados pelo cliente, sendo o _socket_ para armazenar a instância criada, _hostname_ é o ip que da máquina que vai ser conectar, _port_ que recebe o número que corresponde qual o serviço deseja consumir, _buffer_ que aponta para a memória alocada previamente pelo usuário, *buffer_size* o representa o tamanho do _buffer_ e a interface das funções de _callback_
+Criamos também um contexto que armazena os parâmetros utilizados pelo cliente, sendo o _socket_ para armazenar a instância criada, _hostname_ é o ip que da máquina que vai ser conectar, _port_ que recebe o número que corresponde qual o serviço deseja consumir, _buffer_ que aponta para a memória alocada previamente pelo usuário, *buffer_size* o representa o tamanho do _buffer_ e a interface das funções de _callback_
 
 ```c
 typedef struct 
