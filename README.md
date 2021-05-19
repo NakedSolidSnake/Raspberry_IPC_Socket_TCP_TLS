@@ -25,17 +25,17 @@
 * [Referência](#referência)
 
 ## Introdução
-No artigo anterior sobre [TCP](https://github.com/NakedSolidSnake/Raspberry_IPC_Socket_TCP) foi demonstrado como ocorre o processo de comunicação desse IPC, porém conforme descrito no artigo é possível notar que os dados trafegam de forma legível(plaintext), sendo possível realizar a leitura sem maiores problemas. Existem aplicações que a exposição desses dados resulta no compromentimento da aplicação, permitindo que "curiosos" bisbilhotem. Para garantir que os dados não serão capturados e usados de forma ilícita existe uma forma de proteger os dados através da criptografia. Neste artigo será demonstrado como implementar esse IPC usando SSL para proteger as mensagens transitadas. Esse artigo foi baseado/traduzido de acordo com esse [exemplo](https://aticleworld.com/ssl-server-client-using-openssl-in-c/).
+No artigo anterior sobre [TCP](https://github.com/NakedSolidSnake/Raspberry_IPC_Socket_TCP) foi demonstrado como ocorre o processo de comunicação desse IPC, porém conforme descrito no artigo é possível notar que os dados trafegam de forma legível(plain text), sendo possível realizar a leitura sem maiores problemas. Existem aplicações que a exposição desses dados resulta no compromentimento da aplicação, permitindo que "curiosos" bisbilhotem. Para garantir que os dados não serão capturados e usados de forma ilícita existe uma forma de proteger os dados através da criptografia. Neste artigo será demonstrado como implementar esse IPC usando SSL para proteger as mensagens transitadas. Esse artigo foi baseado/traduzido de acordo com esse [exemplo](https://aticleworld.com/ssl-server-client-using-openssl-in-c/).
 
-## O Que é SSL
+## O que é SSL?
 SSL significa _Secure Sockets Layer_ que é um protocolo usado para estabelecer uma conexão criptografada entre um servidor e um cliente. Após estabelecer a conexão, o SSL garante que os dados transmitidos entre o cliente e o servidor estão seguros.
 
 ## Funcionamento SSL
-SSL usa algoritmo de criptografia assimétrica para progeter a transmissão dos dados. Estes algoritmos usam um par de chaves sendo uma pública e outra privada. A chave pública fica disponível e conhecida por qualquer um. A chave privada é conhecida somente por uma das partes podendo ser o servidor ou o cliente. Com o SSL a mensagem criptografada pela chave pública pode ser descriptografada somente pela chave privada e a mensagem criptografada pela chave privada pode ser descriptografada pela chave pública.
+SSL usa algoritmo de criptografia assimétrica e simétrica para progeter a transmissão dos dados, este [artigo](https://cheapsslsecurity.com/blog/what-is-asymmetric-encryption-understand-with-simple-examples/) explica de forma clara. Estes algoritmos usam um par de chaves sendo uma pública e outra privada. A chave pública fica disponível e conhecida por qualquer um. A chave privada é conhecida somente por uma das partes neste caso o servidor. Com o SSL a mensagem criptografada pela chave pública pode ser descriptografada somente pela chave privada e a mensagem criptografada pela chave privada pode ser descriptografada pela chave pública.
 
 
 ## Handshake SSL
-O processo de _handshake_ ocorre em 8 passos antes do início da troca de mensagens entre as parte, para melhor saber como ocorre esse processo a IBM possui um artigo bem explicativo podendo ser acessado [aqui](https://www.ibm.com/docs/pt-br/ibm-mq/8.0?topic=ssl-overview-tls-handshake).
+O processo de _handshake_ ocorre em alguns passos antes do início da troca de mensagens entre as partes, para melhor saber como ocorre esse processo a IBM possui um artigo bem explicativo podendo ser acessado [aqui](https://www.ibm.com/docs/pt-br/ibm-mq/8.0?topic=ssl-overview-tls-handshake).
 
 
 ## Preparação do Ambiente
@@ -54,7 +54,7 @@ sudo apt-get install tcpdump
 ```
 
 ## openssl
-OpenSSL é uma ferramente de criptografia que implementa os protocolos SSL e TLS(_Transport Layer Security_). Com essa ferramenta é posspivel se conectar a servidores que utilizam SSL/TLS.
+OpenSSL é uma ferramente de criptografia que implementa os protocolos SSL e TLS(_Transport Layer Security_). Com essa ferramenta é possível se conectar a servidores que utilizam SSL/TLS.
 
 ## tcpdump 
 O tcpdump é uma ferramenta capaz de monitorar o tráfego de dados em uma dada interface como por exemplo eth0, com ele é possível analisar os pacotes que são recebido e enviados
