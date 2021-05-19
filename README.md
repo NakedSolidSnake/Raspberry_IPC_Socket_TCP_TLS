@@ -24,14 +24,16 @@
 * [Conclusão](#conclusão)
 * [Referência](#referência)
 
+A idéia aqui não é explicar como funciona a criptografia mas sim apresentar que é possível o seu uso.
+
 ## Introdução
-No artigo anterior sobre [TCP](https://github.com/NakedSolidSnake/Raspberry_IPC_Socket_TCP) foi demonstrado como ocorre o processo de comunicação desse IPC, porém conforme descrito no artigo é possível notar que os dados trafegam de forma legível(plain text), sendo possível realizar a leitura sem maiores problemas. Existem aplicações que a exposição desses dados resulta no compromentimento da aplicação, permitindo que "curiosos" bisbilhotem. Para garantir que os dados não serão capturados e usados de forma ilícita existe uma forma de proteger os dados através da criptografia. Neste artigo será demonstrado como implementar esse IPC usando SSL para proteger as mensagens transitadas. Esse artigo foi baseado/traduzido de acordo com esse [exemplo](https://aticleworld.com/ssl-server-client-using-openssl-in-c/).
+No artigo anterior sobre [TCP](https://github.com/NakedSolidSnake/Raspberry_IPC_Socket_TCP) foi demonstrado como ocorre o processo de comunicação desse IPC, porém conforme descrito no artigo é possível notar que os dados trafegam de forma legível(plain text), sendo possível realizar a leitura sem maiores problemas. Existem aplicações que a exposição desses dados resulta no compromentimento da aplicação, permitindo que "curiosos" bisbilhotem. Para garantir que os dados não serão capturados e usados de forma ilícita existe uma forma de proteger os dados através da criptografia. Neste artigo será demonstrado como implementar esse IPC usando SSL para proteger as mensagens tragefadas. Esse artigo foi baseado/traduzido de acordo com esse [exemplo](https://aticleworld.com/ssl-server-client-using-openssl-in-c/).
 
 ## O que é SSL?
 SSL significa _Secure Sockets Layer_ que é um protocolo usado para estabelecer uma conexão criptografada entre um servidor e um cliente. Após estabelecer a conexão, o SSL garante que os dados transmitidos entre o cliente e o servidor estão seguros.
 
 ## Funcionamento SSL
-SSL usa algoritmo de criptografia assimétrica e simétrica para progeter a transmissão dos dados, este [artigo](https://cheapsslsecurity.com/blog/what-is-asymmetric-encryption-understand-with-simple-examples/) explica de forma clara. Estes algoritmos usam um par de chaves sendo uma pública e outra privada. A chave pública fica disponível e conhecida por qualquer um. A chave privada é conhecida somente por uma das partes neste caso o servidor. Com o SSL a mensagem criptografada pela chave pública pode ser descriptografada somente pela chave privada e a mensagem criptografada pela chave privada pode ser descriptografada pela chave pública.
+SSL usa algoritmo de criptografia assimétrica e simétrica para progeter a transmissão dos dados, este [artigo](https://cheapsslsecurity.com/blog/what-is-asymmetric-encryption-understand-with-simple-examples/) explica de forma clara como funciona a transição da forma assimétrica para a forma simétrica. Estes algoritmos usam um par de chaves sendo uma pública e outra privada. A chave pública fica disponível e conhecida por qualquer um. A chave privada é conhecida somente por uma das partes neste caso o servidor. Com o SSL a mensagem criptografada pela chave pública pode ser descriptografada somente pela chave privada e a mensagem criptografada pela chave privada pode ser descriptografada pela chave pública.
 
 
 ## Handshake SSL
@@ -95,7 +97,7 @@ typedef struct
 } TCP_Server_t;
 ```
 
-Essa função realiza os passos de 1 a 3 previamente descritos, para a inicilização do servidor
+Essa função é responsável pela a inicialização do servidor
 ```c
 bool TCP_Server_Init(TCP_Server_t *server);
 ```
@@ -124,7 +126,7 @@ if(!server || !server->buffer)
     break;
 ```
 
-Inicializamos o SSL e inicializamos o seu contexto
+Inicializamos a biblioteca do SSL e inicializamos o seu contexto
 ```c
 SSL_library_init();
 
