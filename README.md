@@ -45,13 +45,13 @@
 A idéia aqui não é explicar como funciona a criptografia mas sim apresentar que é possível o seu uso.
 
 ## Introdução
-No artigo anterior sobre [TCP](https://github.com/NakedSolidSnake/Raspberry_IPC_Socket_TCP) foi demonstrado como ocorre o processo de comunicação desse IPC, porém conforme descrito no artigo é possível notar que os dados trafegam de forma legível(plain text), sendo possível realizar a leitura sem maiores problemas. Existem aplicações que a exposição desses dados resulta no compromentimento da aplicação, permitindo que "curiosos" bisbilhotem. Para garantir que os dados não serão capturados e usados de forma ilícita existe uma forma de proteger os dados através da criptografia. Neste artigo será demonstrado como implementar esse IPC usando SSL para proteger as mensagens tragefadas. Esse artigo foi baseado/traduzido de acordo com esse [exemplo](https://aticleworld.com/ssl-server-client-using-openssl-in-c/).
+No artigo anterior sobre [TCP](https://github.com/NakedSolidSnake/Raspberry_IPC_Socket_TCP) foi demonstrado como ocorre o processo de comunicação desse IPC, porém conforme descrito no artigo é possível notar que os dados trafegam de forma legível(plain text), sendo possível realizar a leitura sem maiores problemas. Existem aplicações que a exposição desses dados resulta no compromentimento da aplicação, permitindo que "curiosos" bisbilhotem. Para garantir que os dados não serão capturados e usados de forma ilícita existe uma forma de proteger os dados através da criptografia. Neste artigo será demonstrado como implementar esse IPC usando SSL para proteger as mensagens trafegadas. Esse artigo foi baseado/traduzido de acordo com esse [exemplo](https://aticleworld.com/ssl-server-client-using-openssl-in-c/).
 
 ## O que é SSL?
 SSL significa _Secure Sockets Layer_ que é um protocolo usado para estabelecer uma conexão criptografada entre um servidor e um cliente. Após estabelecer a conexão, o SSL garante que os dados transmitidos entre o cliente e o servidor estão seguros.
 
 ## Funcionamento SSL
-SSL usa algoritmo de criptografia assimétrica e simétrica para progeter a transmissão dos dados, este [artigo](https://cheapsslsecurity.com/blog/what-is-asymmetric-encryption-understand-with-simple-examples/) explica de forma clara como funciona a transição da forma assimétrica para a forma simétrica. Estes algoritmos usam um par de chaves sendo uma pública e outra privada. A chave pública fica disponível e conhecida por qualquer um. A chave privada é conhecida somente por uma das partes neste caso o servidor. Com o SSL a mensagem criptografada pela chave pública pode ser descriptografada somente pela chave privada e a mensagem criptografada pela chave privada pode ser descriptografada pela chave pública.
+SSL usa algoritmo de criptografia assimétrica e simétrica para proteger a transmissão dos dados, este [artigo](https://cheapsslsecurity.com/blog/what-is-asymmetric-encryption-understand-with-simple-examples/) explica de forma clara como funciona a transição da forma assimétrica para a forma simétrica. Estes algoritmos usam um par de chaves sendo uma pública e outra privada. A chave pública fica disponível e conhecida por qualquer um. A chave privada é conhecida somente por uma das partes neste caso o servidor. Com o SSL a mensagem criptografada pela chave pública pode ser descriptografada somente pela chave privada, para uma explicação mai elaborada clique [aqui](https://aboutssl.org/how-https-and-ssl-works/).
 
 
 ## Handshake SSL
@@ -99,7 +99,7 @@ typedef struct
 
 #### tcp_server.h
 
-Criamos também um contexto que armazena os paramêtros utilizados pelo servidor, sendo o _socket_ para armazenar a instância criada, _port_ que recebe o número que corresponde onde o serviço será disponibilizado, _buffer_ que aponta para a memória alocada previamente pelo usuário, *buffer_size* que representa o tamanho do _buffer_, a interface das funções de _callback_, *ssl_context* que receberá a instância do contexto SSL, _certificate_ que recebe o certificado e _key_ que recebe a chave usada na criptografia.
+Criamos também um contexto que armazena os parâmetros utilizados pelo servidor, sendo o _socket_ para armazenar a instância criada, _port_ que recebe o número que corresponde onde o serviço será disponibilizado, _buffer_ que aponta para a memória alocada previamente pelo usuário, *buffer_size* que representa o tamanho do _buffer_, a interface das funções de _callback_, *ssl_context* que receberá a instância do contexto SSL, _certificate_ que recebe o certificado e _key_ que recebe a chave usada na criptografia.
 
 ```c
 typedef struct
@@ -297,7 +297,7 @@ SSL_library_init();
 return true;
 ```
 
-Na função TCP_Client_Connect definimos algumas váriaveis para auxiliar na comunicação com o servidor, sendo uma variável booleana que representa o estado da parametrização do cliente, uma variável do tipo inteiro que recebe o resultado das funções necessárias para a configuração, uma estrutura sockaddr_in que é usada para configurar o servidor no qual será conectado, e duas variáveis de quantidade de dados enviados e recebidos.
+Na função TCP_Client_Connect definimos algumas variáveis para auxiliar na comunicação com o servidor, sendo uma variável booleana que representa o estado da parametrização do cliente, uma variável do tipo inteiro que recebe o resultado das funções necessárias para a configuração, uma estrutura sockaddr_in que é usada para configurar o servidor no qual será conectado, e duas variáveis de quantidade de dados enviados e recebidos.
 
 ```c
 SSL_CTX *ssl_context;
@@ -362,7 +362,7 @@ Aqui verificamos se a inicialização ocorreu com sucesso e se o callback para e
 ```c
 if( status && client->cb.on_send)
 ```
-Em caso de sucesso passamos o contexto para a implementação feita pelo usuário para preparar o dados a ser enviado para o servidor
+Em caso de sucesso passamos o contexto para a implementação feita pelo usuário para preparar os dados a ser enviado para o servidor
 ```c
 client->cb.on_send(client->buffer, &send_size, data);
 SSL_write(ssl, client->buffer, (int)fmin(send_size, client->buffer_size));
@@ -388,9 +388,9 @@ return status;
 ```
 
  A aplicação é composta por três executáveis sendo eles:
-* _launch_processes_ - é responsável por lançar os processos _button_process_ e _led_process_ atráves da combinação _fork_ e _exec_
-* _button_interface_ - é reponsável por ler o GPIO em modo de leitura da Raspberry Pi e se conectar ao servidor para enviar uma mensagem de alteração de estado.
-* _led_interface_ - é reponsável por escutar novas conexões, recebendo comandos para aplicar em um GPIO configurado como saída
+* _launch_processes_ - é responsável por lançar os processos _button_process_ e _led_process_ através da combinação _fork_ e _exec_
+* _button_interface_ - é responsável por ler o GPIO em modo de leitura da Raspberry Pi e se conectar ao servidor para enviar uma mensagem de alteração de estado.
+* _led_interface_ - é responsável por escutar novas conexões, recebendo comandos para aplicar em um GPIO configurado como saída
 
 ### *launch_processes*
 
@@ -430,7 +430,7 @@ if(pid_led == 0)
 ```
 
 ### *button_interface*
-A implementação do Button_Run ficou simples, onde realizamos a inicialização do interface de botão, inicializamos o cliente e ficamos em loop aguardando o pressionamento do botão para alterar o estado da variável e enviar a mensagem para o servidor
+A implementação do Button_Run ficou simples, onde realizamos a inicialização da interface de botão, inicializamos o cliente e ficamos em loop aguardando o pressionamento do botão para alterar o estado da variável e enviar a mensagem para o servidor
 ```c
 bool Button_Run(TCP_Client_t *client, Button_Data *button)
 {
